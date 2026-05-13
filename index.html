@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Miral AirCanvas🪄</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  
+  <div id="header">
+    <img src="logo.png" alt="Ethr logo"
+         onerror="this.style.display='none'">
+    <div id="header-text">
+      <h1>Miral &nbsp;✦&nbsp; AirCanvas</h1>
+      <p>Draw with your hand · Powered by Computer Vision · by Miral</p>
+    </div>
+  </div>
+
+  <!-- ── Toolbar ── -->
+  <div id="toolbar">
+    <button id="startBtn" onclick="startCamera()">Activate the camera 📸</button>
+    <button onclick="clearCanvas()">Delete 🗑️</button>
+    <button onclick="saveImg()">Save 💾</button>
+    <label>Size</label>
+    <input type="range" id="sz" min="2" max="40" value="8"
+           oninput="brushSize=+this.value; document.getElementById('sv').textContent=this.value"
+           style="width:80px">
+    <span id="sv">8</span>
+    <div style="display:flex; gap:5px" id="swatches">
+      <div class="swatch"        data-c="#ef4444" style="background:#ef4444"></div>
+      <div class="swatch active" data-c="#3b82f6" style="background:#3b82f6"></div>
+      <div class="swatch"        data-c="#22c55e" style="background:#22c55e"></div>
+      <div class="swatch"        data-c="#f59e0b" style="background:#f59e0b"></div>
+      <div class="swatch"        data-c="#a855f7" style="background:#a855f7"></div>
+      <div class="swatch"        data-c="#a855f7" style="background:#d505bd"></div>
+      <div class="swatch"        data-c="#ffffff" style="background:#fff"></div>
+      <div class="swatch"        data-c="#000000" style="background:#111; border:1px solid #555"></div>
+    </div>
+  </div>
+
+  
+
+  <div id="wrapper">
+
+
+    <img id="hero-bg" src="hero.jpg" alt=""
+         onerror="this.style.display='none'">
+
+    <video id="vid" autoplay playsinline muted></video>
+    <canvas id="drawCanvas"></canvas>
+    <canvas id="debugCanvas"></canvas>
+    <div id="dot"></div>
+    <div id="status">Press "Activate the camera" to start</div>
+  </div>
+
+  <div id="hint">
+    ☝️ One finger = Draw &nbsp;|&nbsp; ✌️ Two fingers = Pen up &nbsp;|&nbsp; ✊ Closed hand = Stop
+  </div>
+
+  <div id="footer">AirCanvas&nbsp;—&nbsp; Miral · CS</div>
+
+  
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    let color = '#3b82f6', brushSize = 8, prevX = null, prevY = null;
+    let camStarted = false;
+
+    const vid         = document.getElementById('vid');
+    const drawCanvas  = document.getElementById('drawCanvas');
+    const debugCanvas = document.getElementById('debugCanvas');
+    const dc          = drawCanvas.getContext('2d');
+    const dbg         = debugCanvas.getContext('2d');
+    const dot         = document.getElementById('dot');
+    const status      = document.getElementById('status');
+
+    document.querySelectorAll('.swatch').forEach(s => {
+      s.onclick = () => {
+        document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+        s.classList.add('active');
+        color = s.dataset.c;
+        dot.style.background = color;
+      };
+    });
+
+    function clearCanvas() {
+      dc.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    }
+
+    function saveImg() {
+      const a = document.createElement('a');
+      a.download = 'ethr-drawing.png';
+      a.href = drawCanvas.toDataURL();
+      a.click();
+    }
+
+    function resize() {
+      const r = drawCanvas.getBoundingClientRect();
+      drawCanvas.width  = r.width;
+      drawCanvas.height = r.height;
+      debugCanvas.width  = r.width;
+      debugCanvas.height = r.height;
+    }
+
+    async function startCamera() {
+      if (camStarted) return;
+      camStarted = true;
+      document.getElementById('startBtn').disabled = true;
+      status.textContent = 'Loading hand model...';
+      resize();
+      window.addEventListener('resize', resize);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 640, height: 480 },
+          audio: false
+        });
+        vid.srcObject = stream;
+        await new Promise(r => vid.onloadedmetadata = r);
+
+        const hands = new Hands({
+          locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+        });
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.72,
+          minTrackingConfidence: 0.72
+        });
+        hands.onResults(onResults);
+
+        status.textContent = '✅ All set — move your hand in front of the camera';
+        dot.style.display = 'block';
+
+        const camera = new Camera(vid, {
+          onFrame: async () => { await hands.send({ image: vid }); },
+          width: 640,
+          height: 480
+        });
+        camera.start();
+
+      } catch (e) {
+        status.textContent = '❌ Error: ' + e.message;
+        document.getElementById('startBtn').disabled = false;
+        camStarted = false;
+      }
+    }
+
+    const CONNECTIONS = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17]
+    ];
+
+    function onResults(res) {
+      const W = drawCanvas.width, H = drawCanvas.height;
+      dbg.clearRect(0, 0, W, H);
+
+      if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) {
+        status.textContent = '🤚 No hand detected — bring your hand closer';
+        prevX = null; prevY = null;
+        dot.style.opacity = '0.3';
+        return;
+      }
+
+      const lm  = res.multiHandLandmarks[0];
+      const tip = lm[8];
+      const x   = (1 - tip.x) * W;
+      const y   = tip.y * H;
+
+      dot.style.left       = ((1 - tip.x) * 100) + '%';
+      dot.style.top        = (tip.y * 100) + '%';
+      dot.style.opacity    = '1';
+      dot.style.background = color;
+
+      
+      dbg.strokeStyle = 'rgba(255,255,255,0.35)';
+      dbg.lineWidth   = 1;
+      for (const [a, b] of CONNECTIONS) {
+        dbg.beginPath();
+        dbg.moveTo((1 - lm[a].x) * W, lm[a].y * H);
+        dbg.lineTo((1 - lm[b].x) * W, lm[b].y * H);
+        dbg.stroke();
+      }
+      for (const p of lm) {
+        dbg.beginPath();
+        dbg.arc((1 - p.x) * W, p.y * H, 3, 0, Math.PI * 2);
+        dbg.fillStyle = 'rgba(255,255,255,0.8)';
+        dbg.fill();
+      }
+
+    
+      const tipIdx = [8, 12, 16, 20];
+      const pipIdx = [6, 10, 14, 18];
+      let ext = 0;
+      for (let i = 0; i < 4; i++) {
+        if (lm[tipIdx[i]].y < lm[pipIdx[i]].y) ext++;
+      }
+
+      if (ext === 1) {
+        status.textContent = '✏️ Drawing...';
+        dc.strokeStyle = color;
+        dc.lineWidth   = brushSize;
+        dc.lineCap     = 'round';
+        dc.lineJoin    = 'round';
+        if (prevX !== null) {
+          dc.beginPath();
+          dc.moveTo(prevX, prevY);
+          dc.lineTo(x, y);
+          dc.stroke();
+        }
+        prevX = x; prevY = y;
+      } else if (ext >= 2) {
+        status.textContent = '✌️ Pen up';
+        prevX = null; prevY = null;
+      } else {
+        status.textContent = '✊ Stopped';
+        prevX = null; prevY = null;
+      }
+    }
+  </script>
+
+</body>
+</html>
